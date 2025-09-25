@@ -1,10 +1,23 @@
 # =================== Clone Edição Platinum (Streamlit + BigQuery) ===================
+
 import os
 import pandas as pd
 import streamlit as st
 from google.cloud import bigquery
 from google.oauth2 import service_account
 from streamlit_echarts import st_echarts  # JSON puro
+
+# --------- GUARD: bloqueia acesso direto sem login ---------
+if not st.session_state.get("logged_in", False):
+    # tenta redirecionar pelo servidor
+    try:
+        st.switch_page("app.py")
+    except Exception:
+        pass
+    # garante redirecionamento pelo navegador
+    st.markdown("<meta http-equiv='refresh' content='0; url=/' />", unsafe_allow_html=True)
+    st.stop()
+# -----------------------------------------------------------
 
 PROJECT_ID   = "leads-ts"
 DATASET      = "Clone"
