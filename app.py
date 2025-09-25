@@ -35,6 +35,6 @@ with c2:
             if user == VALID_USER and pwd == VALID_PASS:
                 st.session_state.logged_in = True
                 st.session_state.user_name = user
-                st.switch_page("pages/Main.py")
+                st.switch_page("pages/main.py")
             else:
                 st.error("Usuário ou senha inválidos.")
