@@ -17,15 +17,15 @@ if not st.session_state.get("logged_in", False):
     st.stop()
 # -----------------------------------------------------------
 
-PROJECT_ID   = "leads-ts"
-DATASET      = "Clone"
-TABLE_METAS  = f"`{PROJECT_ID}.{DATASET}.MetasClone`"
-TABLE_PLAT   = f"`{PROJECT_ID}.Validator.validatorClone`"  # (já atualizado)
+PROJECT_ID = "leads-ts"
+DATASET = "Clone"
+TABLE_METAS = f"{PROJECT_ID}.{DATASET}.MetasClone"
+TABLE_PLAT = f"{PROJECT_ID}.{DATASET}.clone_platinum_s"
 
 # Limites/meta
-META_MAX     = 10_000_000.0
+META_MAX = 10_000_000.0
 BASE_INICIAL = 5_835_589.90
-BQ_TZ        = "America/Sao_Paulo"
+BQ_TZ = "America/Sao_Paulo"
 
 # ===== Título com ícone =====
 st.set_page_config(page_title="Clone Edição Platinum", layout="wide")
@@ -78,43 +78,13 @@ FROM {TABLE_METAS}
 ORDER BY data_meta
 """
 
-# válidos x inválidos
 sql_dep = f"""
 SELECT
-  CAST(datadeposito AS DATE) AS dt_local,
-
-  -- VÁLIDOS
-  SUM(
-    CASE
-      WHEN LOWER(TRIM(CAST(checkmark AS STRING))) = 'validado'
-       AND LOWER(TRIM(CAST(depositos AS STRING))) IN ('sim','deposito encontrado','depósito encontrado')
-      THEN 1 ELSE 0
-    END
-  ) AS qtd_valid,
-  SUM(
-    CASE
-      WHEN LOWER(TRIM(CAST(checkmark AS STRING))) = 'validado'
-       AND LOWER(TRIM(CAST(depositos AS STRING))) IN ('sim','deposito encontrado','depósito encontrado')
-      THEN SAFE_CAST(deposito AS NUMERIC) ELSE 0
-    END
-  ) AS total_valid,
-
-  -- INVÁLIDOS
-  SUM(
-    CASE
-      WHEN LOWER(TRIM(CAST(checkmark AS STRING))) <> 'validado'
-      THEN 1 ELSE 0
-    END
-  ) AS qtd_invalid,
-  SUM(
-    CASE
-      WHEN LOWER(TRIM(CAST(checkmark AS STRING))) <> 'validado'
-      THEN SAFE_CAST(deposito AS NUMERIC) ELSE 0
-    END
-  ) AS total_invalid
-
+  data_deposito AS dt_local,
+  COUNT(*)      AS qtd_dep,
+  SUM(deposito) AS total_deposito
 FROM {TABLE_PLAT}
-WHERE datadeposito IS NOT NULL
+WHERE data_deposito IS NOT NULL
 GROUP BY dt_local
 ORDER BY dt_local
 """
@@ -164,23 +134,16 @@ if not df_dep.empty:
     d_all["dt_local"] = pd.to_datetime(d_all["dt_local"], errors="coerce")
     d_all = d_all.dropna(subset=["dt_local"]).sort_values("dt_local")
 else:
-    d_all = pd.DataFrame(columns=["dt_local","qtd_valid","total_valid","qtd_invalid","total_invalid"])
+    d_all = pd.DataFrame(columns=["dt_local", "qtd_dep", "total_deposito"])
 
-# Pré-período (para acumulados)
-pre_sum_val       = float(d_all.loc[d_all["dt_local"] < START_DT, "total_valid"].sum())
-pre_count         = int(  d_all.loc[d_all["dt_local"] < START_DT, "qtd_valid"].sum())
-pre_sum_invalid   = float(d_all.loc[d_all["dt_local"] < START_DT, "total_invalid"].sum())
-pre_count_invalid = int(  d_all.loc[d_all["dt_local"] < START_DT, "qtd_invalid"].sum())
+pre_sum_val = float(d_all.loc[d_all["dt_local"] < START_DT, "total_deposito"].sum())
+pre_count   = int(d_all.loc[d_all["dt_local"] < START_DT, "qtd_dep"].sum())
 
-# Série diária (>= START_DT)
 d_daily = (
     d_all.loc[d_all["dt_local"] >= START_DT]
          .groupby("dt_local", as_index=False)
-         .agg(qtd_valid=("qtd_valid","sum"),
-              total_valid=("total_valid","sum"),
-              qtd_invalid=("qtd_invalid","sum"),
-              total_invalid=("total_invalid","sum"))
-    if not d_all.empty else pd.DataFrame(columns=["dt_local","qtd_valid","total_valid","qtd_invalid","total_invalid"])
+         .agg(qtd_dep=("qtd_dep", "sum"), total_deposito=("total_deposito", "sum"))
+    if not d_all.empty else pd.DataFrame(columns=["dt_local", "qtd_dep", "total_deposito"])
 )
 
 max_m = m_ge["data_meta"].max() if not m_ge.empty else START_DT
@@ -192,31 +155,26 @@ serie_meta = cal.merge(m_ge[["data_meta", "meta_acum"]],
                        left_on="date", right_on="data_meta", how="left").drop(columns=["data_meta"])
 serie_meta["meta_acum"] = serie_meta["meta_acum"].ffill()
 
-serie_dep = cal.merge(d_daily.rename(columns={"dt_local": "date"}), on="date", how="left").fillna({
-    "qtd_valid":0, "total_valid":0.0, "qtd_invalid":0, "total_invalid":0.0
-})
-for c in ["total_valid","total_invalid"]:
-    serie_dep[c] = pd.to_numeric(serie_dep[c], errors="coerce").fillna(0.0)
-for c in ["qtd_valid","qtd_invalid"]:
-    serie_dep[c] = pd.to_numeric(serie_dep[c], errors="coerce").fillna(0).astype(int)
+serie_dep = cal.merge(d_daily.rename(columns={"dt_local": "date"}), on="date", how="left").fillna(
+    {"qtd_dep": 0, "total_deposito": 0.0}
+)
+serie_dep["total_deposito"] = pd.to_numeric(serie_dep["total_deposito"], errors="coerce").fillna(0.0)
+serie_dep["qtd_dep"]        = pd.to_numeric(serie_dep["qtd_dep"], errors="coerce").fillna(0).astype(int)
 
 start_realizado = BASE_INICIAL + pre_sum_val
-serie_dep["realizado_acum"] = start_realizado + serie_dep["total_valid"].cumsum()
+serie_dep["realizado_acum"] = start_realizado + serie_dep["total_deposito"].cumsum()
 
 # ---------- KPIs ----------
-valor_depositos_total_valid   = pre_sum_val + float(serie_dep["total_valid"].sum())
-qtd_depositos_total_valid     = pre_count   + int(serie_dep["qtd_valid"].sum())
-valor_depositos_total_invalid = pre_sum_invalid + float(serie_dep["total_invalid"].sum())
-qtd_depositos_total_invalid   = pre_count_invalid + int(serie_dep["qtd_invalid"].sum())
-
-realizado_atual = float(serie_dep["realizado_acum"].iloc[-1]) if not serie_dep.empty else start_realizado
-meta_atual      = float(serie_meta["meta_acum"].iloc[-1])     if not serie_meta.empty else 0.0
+valor_depositos_total = pre_sum_val + float(serie_dep["total_deposito"].sum())
+qtd_depositos_total   = pre_count   + int(serie_dep["qtd_dep"].sum())
+realizado_atual       = float(serie_dep["realizado_acum"].iloc[-1]) if not serie_dep.empty else start_realizado
+meta_atual            = float(serie_meta["meta_acum"].iloc[-1])     if not serie_meta.empty else 0.0
 
 den = (META_MAX - BASE_INICIAL)
 pct_meta = ((realizado_atual - BASE_INICIAL) / den) * 100.0 if den > 0 else 0.0
 pct_meta = max(0.0, min(100.0, pct_meta))
 
-# ---------- Estilo ----------
+# ---------- Estilo + espaçamento ----------
 st.markdown("""
 <style>
 .kpi-card{
@@ -235,69 +193,30 @@ st.markdown("""
 .meta-info .muted{color:#9CA3AF}
 .footer-auth{ margin-top:28px;padding:10px 12px;border-top:1px solid #1f2937;color:#9CA3AF;font-size:.95rem; }
 .block-container div:empty { display:none !important; }
-
-/* Split interno dos cards */
-.kpi-split{ display:flex; align-items:stretch; gap:16px; }
-.kpi-main{ flex:1; }
-.kpi-sep{ width:1px; background:rgba(255,255,255,.09); }
-
-/* Lado direito: título e valor alinhados ao topo */
-.kpi-side{
-  width:38%;
-  display:flex; flex-direction:column;
-  justify-content:flex-start; align-items:flex-start;
-}
-.kpi-side .side-label{
-  color:#93a1b5; font-size:.86rem; margin-bottom:6px;
-  text-transform:uppercase; letter-spacing:.4px;
-  margin-top:-4px; line-height:1;
-}
-.kpi-side .side-value{ color:#f59e0b; font-weight:800; font-size:1.1rem; }
 </style>
 """, unsafe_allow_html=True)
 
 # ========== LAYOUT PRINCIPAL – 2 colunas ==========
 left_col, right_col = st.columns([1, 1], gap="large")
 
-# ----- ESQUERDA: cards -----
+# ----- ESQUERDA: 3 cards -----
 with left_col:
     st.markdown('<div class="col-left-stack">', unsafe_allow_html=True)
 
-    # Quantidade
     st.markdown(f"""
     <div class="kpi-card">
-      <div class="kpi-header"><div class="kpi-icon">📦</div> Quantidade de depósitos <strong>validados</strong></div>
-      <div class="kpi-split">
-        <div class="kpi-main">
-          <div class="kpi-value">{fmt_int_br(qtd_depositos_total_valid)}</div>
-        </div>
-        <div class="kpi-sep"></div>
-        <div class="kpi-side">
-          <div class="side-label">Quantidade de depósitos invalidados</div>
-          <div class="side-value">{fmt_int_br(qtd_depositos_total_invalid)}</div>
-        </div>
-      </div>
+      <div class="kpi-header"><div class="kpi-icon">📦</div> Quantidade de depósitos</div>
+      <div class="kpi-value">{fmt_int_br(qtd_depositos_total)}</div>
     </div>
     """, unsafe_allow_html=True)
 
-    # Valor
     st.markdown(f"""
     <div class="kpi-card">
-      <div class="kpi-header"><div class="kpi-icon">💵</div> Valor de depósitos <strong>validados</strong></div>
-      <div class="kpi-split">
-        <div class="kpi-main">
-          <div class="kpi-value">${fmt_br(valor_depositos_total_valid)}</div>
-        </div>
-        <div class="kpi-sep"></div>
-        <div class="kpi-side">
-          <div class="side-label">Valor de depósitos invalidados</div>
-          <div class="side-value">$ {fmt_br(valor_depositos_total_invalid)}</div>
-        </div>
-      </div>
+      <div class="kpi-header"><div class="kpi-icon">💵</div> Valor de depósitos</div>
+      <div class="kpi-value">${fmt_br(valor_depositos_total)}</div>
     </div>
     """, unsafe_allow_html=True)
 
-    # % da meta
     st.markdown(f"""
     <div class="kpi-card">
       <div class="kpi-header"><div class="kpi-icon">🎯</div> Porcentagem da meta</div>
@@ -307,7 +226,7 @@ with left_col:
 
     st.markdown('</div>', unsafe_allow_html=True)
 
-# ----- DIREITA: Meta Diária + “Depósitos de hoje” -----
+# ----- DIREITA: Barra da Meta + “Depósitos de hoje” -----
 with right_col:
     now_sp     = pd.Timestamp.now(tz=BQ_TZ)
     today_date = pd.Timestamp(now_sp.date())
@@ -319,10 +238,8 @@ with right_col:
         last_meta_diaria = m["Meta_Diaria"].dropna()
         meta_diaria_hoje = float(last_meta_diaria.iloc[-1]) if not last_meta_diaria.empty else 10_000.0
 
-    dep_today_valid   = d_all.loc[d_all["dt_local"] == today_date, "total_valid"]
-    dep_today_invalid = d_all.loc[d_all["dt_local"] == today_date, "total_invalid"]
-    depositos_hoje    = float(dep_today_valid.iloc[0]) if not dep_today_valid.empty else 0.0
-    invalidos_hoje    = float(dep_today_invalid.iloc[0]) if not dep_today_invalid.empty else 0.0
+    dep_today = d_all.loc[d_all["dt_local"] == today_date, "total_deposito"]
+    depositos_hoje = float(dep_today.iloc[0]) if not dep_today.empty else 0.0
 
     pct_hoje = (depositos_hoje / meta_diaria_hoje * 100.0) if meta_diaria_hoje > 0 else 0.0
     pct_hoje = max(0.0, min(100.0, pct_hoje))
@@ -354,8 +271,7 @@ with right_col:
     st_echarts(options=bar_opts, height="54px", theme="dark")
 
     st.markdown(
-        f'<div class="meta-info">$ {fmt_br(depositos_hoje)} de  $ {fmt_br(meta_diaria_hoje)} • Progresso: {pct_hoje:.2f}%. '
-        f'<span class="muted">Depósitos invalidados hoje: $ {fmt_br(invalidos_hoje)}</span></div>',
+        f'<div class="meta-info">$ {fmt_br(depositos_hoje)} de  $ {fmt_br(meta_diaria_hoje)} • Progresso: {pct_hoje:.2f}%.</div>',
         unsafe_allow_html=True
     )
     st.markdown('</div>', unsafe_allow_html=True)
@@ -363,23 +279,14 @@ with right_col:
     st.markdown(f"""
     <div class="kpi-card">
       <div class="kpi-header"><div class="kpi-icon">💰</div> Depósitos de hoje</div>
-      <div class="kpi-split">
-        <div class="kpi-main">
-          <div class="kpi-value">$ {fmt_br(depositos_hoje)}</div>
-          <div class="kpi-sub" style="display:block;">Data: {today_date:%d/%m/%Y}</div>
-        </div>
-        <div class="kpi-sep"></div>
-        <div class="kpi-side">
-          <div class="side-label">Depósitos invalidados hoje</div>
-          <div class="side-value">$ {fmt_br(invalidos_hoje)}</div>
-        </div>
-      </div>
+      <div class="kpi-value">${fmt_br(depositos_hoje)}</div>
+      <div class="kpi-sub" style="display:block;">Data: {today_date:%d/%m/%Y}</div>
     </div>
     """, unsafe_allow_html=True)
 
     st.markdown('</div>', unsafe_allow_html=True)
 
-# ---------- GRÁFICO 1 (acumulado válidos) ----------
+# ---------- GRÁFICO 1 ----------
 st.markdown("---")
 
 x_labels = cal["date"].dt.strftime("%d/%m").tolist()
@@ -438,90 +345,94 @@ options = {
          "markLine": {"symbol": "none","lineStyle": {"type": "dotted", "color": "#9CA3AF"},
                       "label": {"color": "#E5E7EB", "fontSize": 12},
                       "data": [{"xAxis": SUBMETA_LABEL, "name": "15/11"}, {"yAxis": SUBMETA_VALOR, "name": "9M"}]},
-         "markPoint": {"symbol": "circle", "symbolSize": 48,
-                       "label": {"color": "#0f172a", "fontWeight": "700"},
+         "markPoint": {"symbolSize": 48, "label": {"color": "#0f172a", "fontWeight": "700"},
                        "itemStyle": {"color": "#34d399"},
                        "data": [{"coord": [SUBMETA_LABEL, SUBMETA_VALOR], "value": "9M"}]}}
     ]
 }
 st_echarts(options=options, height="520px", theme="dark")
 
-# ---------- GRÁFICO 2 — Acumulado (0→) vs Meta Diária ----------
+# ---------- GRÁFICO 2 — Linha (Valor de depósitos por dia, histórico completo) ----------
 st.markdown("---")
 
-meta_daily_aligned = cal.merge(
-    m_ge[["data_meta", "Meta_Diaria"]],
-    left_on="date", right_on="data_meta", how="left"
-).drop(columns=["data_meta"])
-meta_daily_aligned["Meta_Diaria"] = pd.to_numeric(meta_daily_aligned["Meta_Diaria"], errors="coerce").ffill().fillna(0.0)
-meta_acum_zero = meta_daily_aligned["Meta_Diaria"].cumsum().round(2).tolist()
+if not d_all.empty:
+    # Série completa desde o primeiro depósito até o último, dias sem depósito = 0
+    start_full = d_all["dt_local"].min().normalize()
+    end_full   = d_all["dt_local"].max().normalize()
+    cal_full = pd.DataFrame({"date": pd.date_range(start_full, end_full, freq="D")})
+    totals = d_all.groupby("dt_local", as_index=False)["total_deposito"].sum().rename(columns={"dt_local": "date"})
+    serie_val = cal_full.merge(totals, on="date", how="left").fillna({"total_deposito": 0.0})
+else:
+    serie_val = pd.DataFrame({"date": [], "total_deposito": []})
 
-real_acum_zero = (pre_sum_val + serie_dep["total_valid"].cumsum()).round(2).tolist()
+x_labels_line = serie_val["date"].dt.strftime("%d/%m").tolist()
+y_values      = serie_val["total_deposito"].astype(float).round(2).tolist()
 
-# ---- CAP: barras nunca passam da meta; epsilon evita cruzar por arredondamento
-EPS = 1e-6
-bars_plot = [min(r, max(m - EPS, 0)) for r, m in zip(real_acum_zero, meta_acum_zero)]
-
-x_labels2 = x_labels
-
-# RÓTULOS FORA DA COLUNA (no topo)
-bar_data_with_labels_2 = [{
+line_data = [{
     "value": float(v),
     "label": {
         "show": True,
-        "position": "top",      # <- fora da coluna
+        "position": "top",
         "distance": 8,
-        "formatter": fmt_short(float(v)),
         "color": "#E5E7EB",
-        "fontSize": 10
+        "backgroundColor": "rgba(15,23,42,0.85)",
+        "borderRadius": 6,
+        "padding": [2, 6],
+        "formatter": f"$ {fmt_br(v)}",
+        "fontWeight": 700
     }
-} for v in bars_plot]
+} for v in y_values]
 
-# Pontos de check (quando REAL ≥ META)
-checks = [{"coord": [x_labels2[i], float(meta_acum_zero[i])], "value": "✓"}
-          for i in range(len(meta_acum_zero))
-          if float(real_acum_zero[i]) + 1e-9 >= float(meta_acum_zero[i])]
+n3 = len(y_values)
+WINDOW3 = min(25, max(7, n3))                 # Tamanho fixo da janela
+start_idx3, end_idx3 = 0, WINDOW3 - 1         # início da janela visível
 
-n2 = len(bars_plot)
-WINDOW2 = min(25, max(1, n2))
-start_idx2, end_idx2 = 0, WINDOW2 - 1
-
-options2 = {
+line_opts = {
     "backgroundColor": "transparent",
-    "title": {"text": "Forecast: Realizado vs Meta diária", "left": 0, "top": 8,
-              "textStyle": {"color": "#E5E7EB", "fontSize": 18}},
+    "title": {"text": "Valor de depósitos por dia","left": 0,"top": 8,
+              "textStyle": {"color": "#E5E7EB","fontSize": 18}},
     "tooltip": {"trigger": "axis"},
-    "legend": {"data": ["Realizado", "Meta diária"], "top": 36, "textStyle": {"color": "#E5E7EB"}},
     "grid": {"left": 64, "right": 20, "top": 72, "bottom": 80, "containLabel": True},
-    "xAxis": {"type": "category", "data": x_labels2, "axisLabel": {"color": "#E5E7EB", "interval": 0}},
+    "xAxis": {"type": "category", "data": x_labels_line,
+              "axisLabel": {"color": "#E5E7EB", "interval": 0}},
     "yAxis": {"type": "value", "min": 0, "max": "dataMax",
-              "axisLabel": {"show": False}, "axisLine": {"show": False},
-              "axisTick": {"show": False}, "splitLine": {"show": True}},
+              "axisLabel": {"color": "#9CA3AF"}},
     "dataZoom": [
-        {"type": "slider","xAxisIndex": 0,"startValue": start_idx2,"endValue": end_idx2,"zoomLock": True,
-         "minValueSpan": WINDOW2,"maxValueSpan": WINDOW2,"bottom": 28,"height": 24,"handleSize": 0,
-         "handleStyle": {"opacity": 0},"showDetail": False,"brushSelect": False,
-         "fillerColor": "rgba(255,255,255,0.18)","backgroundColor": "rgba(255,255,255,0.06)",
+        {"type": "slider","xAxisIndex": 0,
+         "startValue": start_idx3, "endValue": end_idx3,
+         "zoomLock": True,                         # janela fixa
+         "minValueSpan": WINDOW3, "maxValueSpan": WINDOW3,
+         "bottom": 28, "height": 24, "handleSize": 0,
+         "handleStyle": {"opacity": 0}, "showDetail": False, "brushSelect": False,
+         "fillerColor": "rgba(255,255,255,0.18)", "backgroundColor": "rgba(255,255,255,0.06)",
          "borderColor": "rgba(255,255,255,0.15)"},
-        {"type": "inside","xAxisIndex": 0,"startValue": start_idx2,"endValue": end_idx2,
-         "zoomLock": True,"minValueSpan": WINDOW2,"maxValueSpan": WINDOW2}
+        {"type": "inside","xAxisIndex": 0,
+         "startValue": start_idx3, "endValue": end_idx3,
+         "zoomLock": True,                         # janela fixa
+         "minValueSpan": WINDOW3, "maxValueSpan": WINDOW3}
     ],
-    "series": [
-        {"name": "Realizado", "type": "bar", "data": bar_data_with_labels_2,
-         "barMaxWidth": 53, "barMinWidth": 22,
-         "itemStyle": {"borderRadius": [8, 8, 0, 0], "color": "#000064"},
-         "label": {"show": True}, "labelLayout": {"hideOverlap": True}},
-        {"name": "Meta diária", "type": "line", "data": meta_acum_zero, "symbol": "circle",
-         "itemStyle": {"color": "#34d399"}, "lineStyle": {"width": 3, "type": "dashed", "color": "#34d399"},
-         "markPoint": {
-             "symbol": "circle", "symbolSize": 18,
-             "label": {"show": True, "formatter": "✓", "color": "#0f172a", "fontWeight": "700"},
-             "itemStyle": {"color": "#34d399"},
-             "data": checks
-         }}
-    ]
+    "series": [{
+        "name": "Valor/dia",
+        "type": "line",
+        "smooth": True,
+        "symbol": "circle",
+        "symbolSize": 6,
+        "data": line_data,
+        "lineStyle": {"width": 3, "color": "#34d399"},
+        "itemStyle": {"color": "#34d399"},
+        "areaStyle": {
+            "opacity": 0.25,
+            "color": {
+                "type": "linear", "x": 0, "y": 0, "x2": 0, "y2": 1,
+                "colorStops": [
+                    {"offset": 0, "color": "rgba(52,211,153,0.45)"},
+                    {"offset": 1, "color": "rgba(52,211,153,0.05)"}
+                ]
+            }
+        }
+    }]
 }
-st_echarts(options=options2, height="520px", theme="dark")
+st_echarts(options=line_opts, height="520px", theme="dark")
 
 # ===== Rodapé com modo de autenticação =====
 st.markdown(f"""
