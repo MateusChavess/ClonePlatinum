@@ -9,12 +9,10 @@ from streamlit_echarts import st_echarts  # JSON puro
 
 # --------- GUARD: bloqueia acesso direto sem login ---------
 if not st.session_state.get("logged_in", False):
-    # tenta redirecionar pelo servidor
     try:
         st.switch_page("app.py")
     except Exception:
         pass
-    # garante redirecionamento pelo navegador
     st.markdown("<meta http-equiv='refresh' content='0; url=/' />", unsafe_allow_html=True)
     st.stop()
 # -----------------------------------------------------------
@@ -42,8 +40,8 @@ if "last_updated" not in st.session_state:
 hdr_l, hdr_r = st.columns([1, 1], gap="large")
 with hdr_l:
     if st.button("🔄 Atualizar dados", use_container_width=True, type="primary"):
-        st.cache_data.clear()               # limpa cache
-        st.session_state.refresh_token += 1 # força reconsulta
+        st.cache_data.clear()
+        st.session_state.refresh_token += 1
 with hdr_r:
     if st.session_state.last_updated:
         st.info(f"Última atualização: {st.session_state.last_updated}", icon="🕒")
@@ -183,16 +181,10 @@ st.markdown("""
 .kpi-icon{width:30px;height:30px;border-radius:999px;display:flex;align-items:center;justify-content:center;background:rgba(255,255,255,.06);border:1px solid #1f2937;font-size:18px}
 .kpi-value{font-size:1.9rem;font-weight:900;color:#E5E7EB;line-height:1.08}
 .kpi-sub{display:none}
-
-/* container dos 3 cards */
 .col-left-stack { display:flex; flex-direction:column; }
-/* espaçamento suave entre os cards sem afetar o último */
 .col-left-stack > .kpi-card { margin-bottom: 14px; }
 .col-left-stack > .kpi-card:last-child { margin-bottom: 0; }
-
-/* direita mantém seu espaçamento normal */
 .col-right-stack{ display:flex; flex-direction:column; gap:20px; }
-
 .meta-info{margin-top:8px;color:#E5E7EB;font-size:1rem}
 .meta-info .muted{color:#9CA3AF}
 .footer-auth{ margin-top:28px;padding:10px 12px;border-top:1px solid #1f2937;color:#9CA3AF;font-size:.95rem; }
@@ -273,7 +265,6 @@ with right_col:
     }
     st_echarts(options=bar_opts, height="54px", theme="dark")
 
-    # Com cifrão nos dois valores:
     st.markdown(
         f'<div class="meta-info">$ {fmt_br(depositos_hoje)} de  $ {fmt_br(meta_diaria_hoje)} • Progresso: {pct_hoje:.2f}%.</div>',
         unsafe_allow_html=True
@@ -290,7 +281,7 @@ with right_col:
 
     st.markdown('</div>', unsafe_allow_html=True)
 
-# ---------- GRÁFICO ----------
+# ---------- GRÁFICO 1 ----------
 st.markdown("---")
 
 x_labels = cal["date"].dt.strftime("%d/%m").tolist()
@@ -307,21 +298,14 @@ def _safe_max(seq, fallback):
 y_max = max(_safe_max(y_barras, start_realizado), _safe_max(y_linha, start_realizado))
 y_min = max(0.0, start_realizado - 0.02 * (y_max - start_realizado))
 
-# Rótulos dentro das colunas
 bar_data_with_labels = []
 for v in y_barras:
     if v is None:
         bar_data_with_labels.append(None); continue
     bar_data_with_labels.append({
         "value": float(v),
-        "label": {
-            "show": True,
-            "position": "insideTop",
-            "distance": 6,
-            "formatter": fmt_short(float(v)),
-            "color": "#E5E7EB",
-            "fontSize": 10
-        }
+        "label": {"show": True, "position": "insideTop", "distance": 6,
+                  "formatter": fmt_short(float(v)), "color": "#E5E7EB", "fontSize": 10}
     })
 
 n = len(y_barras)
@@ -348,41 +332,81 @@ options = {
          "zoomLock": True,"minValueSpan": WINDOW,"maxValueSpan": WINDOW}
     ],
     "series": [
-        {
-            "name": "Realizado",
-            "type": "bar",
-            "data": bar_data_with_labels,
-            "barMaxWidth": 53,
-            "itemStyle": {"borderRadius": [8, 8, 0, 0], "color": "#000064"},
-            "label": {"show": True},
-            "labelLayout": {"hideOverlap": True}
-        },
-        {
-            "name": "Meta",
-            "type": "line",
-            "data": y_linha,
-            "symbol": "circle",
-            "itemStyle": {"color": "#34d399"},
-            "lineStyle": {"width": 3, "type": "dashed", "color": "#34d399"},
-            "markLine": {
-                "symbol": "none",
-                "lineStyle": {"type": "dotted", "color": "#9CA3AF"},
-                "label": {"color": "#E5E7EB", "fontSize": 12},
-                "data": [
-                    {"xAxis": SUBMETA_LABEL, "name": "15/11"},
-                    {"yAxis": SUBMETA_VALOR, "name": "9M"},
-                ],
-            },
-            "markPoint": {
-                "symbolSize": 48,
-                "label": {"color": "#0f172a", "fontWeight": "700"},
-                "itemStyle": {"color": "#34d399"},
-                "data": [{"coord": [SUBMETA_LABEL, SUBMETA_VALOR], "value": "9M"}],
-            },
-        }
+        {"name": "Realizado","type": "bar","data": bar_data_with_labels,"barMaxWidth": 53,
+         "itemStyle": {"borderRadius": [8, 8, 0, 0], "color": "#000064"},"label": {"show": True},
+         "labelLayout": {"hideOverlap": True}},
+        {"name": "Meta","type": "line","data": y_linha,"symbol": "circle",
+         "itemStyle": {"color": "#34d399"}, "lineStyle": {"width": 3, "type": "dashed", "color": "#34d399"},
+         "markLine": {"symbol": "none","lineStyle": {"type": "dotted", "color": "#9CA3AF"},
+                      "label": {"color": "#E5E7EB", "fontSize": 12},
+                      "data": [{"xAxis": SUBMETA_LABEL, "name": "15/11"}, {"yAxis": SUBMETA_VALOR, "name": "9M"}]},
+         "markPoint": {"symbolSize": 48, "label": {"color": "#0f172a", "fontWeight": "700"},
+                       "itemStyle": {"color": "#34d399"},
+                       "data": [{"coord": [SUBMETA_LABEL, SUBMETA_VALOR], "value": "9M"}]}}
     ]
 }
 st_echarts(options=options, height="520px", theme="dark")
+
+# ---------- GRÁFICO 2 — Acumulado (0→) vs Meta Diária ----------
+st.markdown("---")
+
+# Meta diária (alinhada ao calendário) e acumulada a partir de 0
+meta_daily_aligned = cal.merge(
+    m_ge[["data_meta", "Meta_Diaria"]],
+    left_on="date", right_on="data_meta", how="left"
+).drop(columns=["data_meta"])
+meta_daily_aligned["Meta_Diaria"] = pd.to_numeric(meta_daily_aligned["Meta_Diaria"], errors="coerce").ffill().fillna(0.0)
+meta_acum_zero = meta_daily_aligned["Meta_Diaria"].cumsum().round(2).tolist()
+
+# Realizado acumulado inclui depósitos ANTES de START_DT
+real_acum_zero = (pre_sum_val + serie_dep["total_deposito"].cumsum()).round(2).tolist()
+
+# Para não ultrapassar a linha da meta no gráfico, limitamos visualmente as barras à meta:
+bars_plot = [min(r, m) for r, m in zip(real_acum_zero, meta_acum_zero)]
+
+x_labels2 = x_labels
+
+# Rótulos dentro das colunas (com valores reais das barras plotadas)
+bar_data_with_labels_2 = [{
+    "value": float(v),
+    "label": {"show": True, "position": "insideTop", "distance": 6,
+              "formatter": fmt_short(float(v)), "color": "#E5E7EB", "fontSize": 10}
+} for v in bars_plot]
+
+n2 = len(bars_plot)
+WINDOW2 = min(25, max(1, n2))
+start_idx2, end_idx2 = 0, WINDOW2 - 1
+
+options2 = {
+    "backgroundColor": "transparent",
+    "title": {"text": "Forecast: Realizado vs Meta diária", "left": 0, "top": 8,
+              "textStyle": {"color": "#E5E7EB", "fontSize": 18}},
+    "tooltip": {"trigger": "axis"},
+    "legend": {"data": ["Realizado", "Meta"], "top": 36, "textStyle": {"color": "#E5E7EB"}},
+    "grid": {"left": 64, "right": 20, "top": 72, "bottom": 80, "containLabel": True},
+    "xAxis": {"type": "category", "data": x_labels2, "axisLabel": {"color": "#E5E7EB", "interval": 0}},
+    "yAxis": {"type": "value", "min": 0, "max": "dataMax",
+              "axisLabel": {"show": False}, "axisLine": {"show": False},
+              "axisTick": {"show": False}, "splitLine": {"show": True}},
+    "dataZoom": [
+        {"type": "slider","xAxisIndex": 0,"startValue": start_idx2,"endValue": end_idx2,"zoomLock": True,
+         "minValueSpan": WINDOW2,"maxValueSpan": WINDOW2,"bottom": 28,"height": 24,"handleSize": 0,
+         "handleStyle": {"opacity": 0},"showDetail": False,"brushSelect": False,
+         "fillerColor": "rgba(255,255,255,0.18)","backgroundColor": "rgba(255,255,255,0.06)",
+         "borderColor": "rgba(255,255,255,0.15)"},
+        {"type": "inside","xAxisIndex": 0,"startValue": start_idx2,"endValue": end_idx2,
+         "zoomLock": True,"minValueSpan": WINDOW2,"maxValueSpan": WINDOW2}
+    ],
+    "series": [
+        {"name": "Realizado", "type": "bar", "data": bar_data_with_labels_2,
+         "barMaxWidth": 45,  # um pouco mais largo, sem exagero
+         "itemStyle": {"borderRadius": [8, 8, 0, 0], "color": "#000064"},
+         "label": {"show": True}, "labelLayout": {"hideOverlap": True}},
+        {"name": "Meta", "type": "line", "data": meta_acum_zero, "symbol": "circle",
+         "itemStyle": {"color": "#34d399"}, "lineStyle": {"width": 3, "type": "dashed", "color": "#34d399"}}
+    ]
+}
+st_echarts(options=options2, height="520px", theme="dark")
 
 # ===== Rodapé com modo de autenticação =====
 st.markdown(f"""
