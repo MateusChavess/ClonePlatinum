@@ -27,6 +27,8 @@ META_MAX = 10_000_000.0
 BASE_INICIAL = 5_835_589.90
 BQ_TZ = "America/Sao_Paulo"
 
+META_REAL_EVENTO = 4_164_410.10  # <<< adição
+
 # ===== Título com ícone =====
 st.set_page_config(page_title="Clone Edição Platinum", layout="wide")
 st.title("📊 Clone Edição Platinum")
@@ -193,6 +195,12 @@ st.markdown("""
 .meta-info .muted{color:#9CA3AF}
 .footer-auth{ margin-top:28px;padding:10px 12px;border-top:1px solid #1f2937;color:#9CA3AF;font-size:.95rem; }
 .block-container div:empty { display:none !important; }
+
+/* <<< adição: layout para mostrar a meta real ao lado do valor */
+.kpi-split{display:flex;align-items:flex-start;justify-content:space-between;gap:18px;}
+.kpi-meta{min-width:230px;border-left:1px dashed #374151;padding-left:14px;margin-left:8px;}
+.kpi-meta-label{font-size:.90rem;color:#9CA3AF;margin-bottom:4px;font-weight:700;}
+.kpi-meta-value{font-size:1.25rem;font-weight:900;color:#E5E7EB;}
 </style>
 """, unsafe_allow_html=True)
 
@@ -210,10 +218,17 @@ with left_col:
     </div>
     """, unsafe_allow_html=True)
 
+    # <<< adição: meta real do evento exibida ao lado do valor de depósitos
     st.markdown(f"""
     <div class="kpi-card">
       <div class="kpi-header"><div class="kpi-icon">💵</div> Valor de depósitos</div>
-      <div class="kpi-value">${fmt_br(valor_depositos_total)}</div>
+      <div class="kpi-split">
+        <div class="kpi-value">$ {fmt_br(valor_depositos_total)}</div>
+        <div class="kpi-meta">
+          <div class="kpi-meta-label">Meta real do evento</div>
+          <div class="kpi-meta-value">$ {fmt_br(META_REAL_EVENTO)}</div>
+        </div>
+      </div>
     </div>
     """, unsafe_allow_html=True)
 
@@ -352,11 +367,10 @@ options = {
 }
 st_echarts(options=options, height="520px", theme="dark")
 
-# ---------- GRÁFICO 2 — Linha (Valor de depósitos por dia, histórico completo) ----------
+# ---------- GRÁFICO 2 — Linha ----------
 st.markdown("---")
 
 if not d_all.empty:
-    # Série completa desde o primeiro depósito até o último, dias sem depósito = 0
     start_full = d_all["dt_local"].min().normalize()
     end_full   = d_all["dt_local"].max().normalize()
     cal_full = pd.DataFrame({"date": pd.date_range(start_full, end_full, freq="D")})
@@ -384,8 +398,8 @@ line_data = [{
 } for v in y_values]
 
 n3 = len(y_values)
-WINDOW3 = min(25, max(7, n3))                 # Tamanho fixo da janela
-start_idx3, end_idx3 = 0, WINDOW3 - 1         # início da janela visível
+WINDOW3 = min(25, max(7, n3))
+start_idx3, end_idx3 = 0, WINDOW3 - 1
 
 line_opts = {
     "backgroundColor": "transparent",
@@ -400,7 +414,7 @@ line_opts = {
     "dataZoom": [
         {"type": "slider","xAxisIndex": 0,
          "startValue": start_idx3, "endValue": end_idx3,
-         "zoomLock": True,                         # janela fixa
+         "zoomLock": True,
          "minValueSpan": WINDOW3, "maxValueSpan": WINDOW3,
          "bottom": 28, "height": 24, "handleSize": 0,
          "handleStyle": {"opacity": 0}, "showDetail": False, "brushSelect": False,
@@ -408,7 +422,7 @@ line_opts = {
          "borderColor": "rgba(255,255,255,0.15)"},
         {"type": "inside","xAxisIndex": 0,
          "startValue": start_idx3, "endValue": end_idx3,
-         "zoomLock": True,                         # janela fixa
+         "zoomLock": True,
          "minValueSpan": WINDOW3, "maxValueSpan": WINDOW3}
     ],
     "series": [{
